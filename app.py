@@ -90,7 +90,8 @@ if st.button("Generate Next Reading", type="primary"):
         if st.session_state.history else False
     )
     reading = st.session_state.simulator.next_reading(
-        cooling_on=last_cooling
+        cooling_on=last_cooling,
+        timestep_hours=timestep_hours,
     )
 
     features_now = {
@@ -113,6 +114,7 @@ if st.button("Generate Next Reading", type="primary"):
         target_max=target_max,
         battery_level=reading.battery_level,
         solar_power=reading.solar_power,
+        cooling_on=last_cooling,
     )
 
     energy = manage_energy(
@@ -122,7 +124,8 @@ if st.button("Generate Next Reading", type="primary"):
         pcm_level=reading.pcm_level,
         timestep_hours=timestep_hours,
     )
-
+    st.session_state.simulator.battery_level = energy["battery_level_after"]
+    st.session_state.simulator.pcm_level = energy["pcm_level_after"]
     st.session_state.history.append({
         "time": reading.timestamp,
         "ambient_temp": reading.ambient_temp,
