@@ -10,6 +10,13 @@ from src.simulator import ColdStorageSimulator
 from src.energy_manager import manage_energy
 from src.cooling_controller import decide_cooling
 
+from src.resilience import (
+    CROP_PROFILES,
+    simulate_monsoon,
+    calculate_batch_priority,
+    calculate_prediction_metrics,
+)
+
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "temperature_model.joblib"
 
@@ -324,6 +331,53 @@ else:
 history_df = pd.DataFrame(st.session_state.history)
 
 
+# ---------------- ML PREDICTION RELIABILITY ----------------
+
+st.divider()
+st.header("🤖 ML Prediction Reliability")
+
+st.caption(
+    "Compare ML predictions with later simulated temperature readings. "
+    "Metrics are estimates from this simulation, not real-world validation."
+)
+
+if len(st.session_state.history) >= 2:
+    reliability_df = pd.DataFrame(st.session_state.history)
+
+    # Compare each previous prediction with the next recorded temperature.
+    actual_temps = reliability_df["temperature"].iloc[1:].tolist()
+    predicted_temps = reliability_df["prediction"].iloc[:-1].tolist()
+
+    try:
+        metrics = calculate_prediction_metrics(
+            actual=actual_temps,
+            predicted=predicted_temps,
+        )
+
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+        metric_col1.metric("MAE", f"{metrics['mae']:.3f} °C")
+        metric_col2.metric("RMSE", f"{metrics['rmse']:.3f} °C")
+        metric_col3.metric("Comparisons", metrics["count"])
+
+        st.caption(
+            "MAE = average absolute prediction error. "
+            "RMSE gives larger errors more weight. "
+            "This comparison assumes each prediction is intended "
+            "to forecast the next recorded reading."
+        )
+
+    except ValueError as error:
+        st.warning(f"Metrics could not be calculated: {error}")
+
+else:
+    st.info(
+        "Generate at least 2 readings to calculate preliminary "
+        "prediction error metrics."
+    )
+
+
+
 st.subheader("Temperature Monitoring")
 fig = go.Figure()
 fig.add_trace(go.Scatter(
@@ -518,3 +572,223 @@ if st.button("Reset Simulation"):
     st.session_state.simulator = ColdStorageSimulator()
     st.session_state.history = []
     st.rerun()
+
+
+# ---------------- MONSOON SURVIVAL SIMULATOR ----------------
+
+st.header("🌧️ Monsoon Survival Simulator")
+
+st.caption(
+    "Estimate energy availability during cloudy weather. "
+    "This simplified scenario is not a weather forecast."
+)
+
+monsoon_col1, monsoon_col2 = st.columns(2)
+
+with monsoon_col1:
+    monsoon_solar_drop = st.slider(
+        "Monsoon solar power reduction (%)",
+        min_value=0,
+        max_value=100,
+        value=60,
+        key="monsoon_solar_drop",
+    )
+
+    scenario_days = st.slider(
+        "Simulation duration (days)",
+        min_value=1,
+        max_value=7,
+        value=3,
+        key="monsoon_days",
+    )
+
+with monsoon_col2:
+    monsoon_load_increase = st.slider(
+        "Monsoon cooling load increase (%)",
+        min_value=0,
+        max_value=100,
+        value=20,
+        key="monsoon_load_increase",
+    )
+
+    battery_capacity = st.number_input(
+        "Assumed battery capacity (Wh)",
+        min_value=1.0,
+        max_value=100000.0,
+        value=1000.0,
+        step=100.0,
+        key="monsoon_battery_capacity",
+    )
+
+try:
+    # Use values from the latest simulated reading.
+    latest_solar = float(latest["solar_power"])
+    latest_battery = float(latest["battery"])
+
+    # Configured cooling load used as the scenario demand.
+    latest_load = float(cooling_power)
+
+    monsoon_result = simulate_monsoon(
+        solar_power_w=latest_solar,
+        cooling_load_w=latest_load,
+        battery_percent=latest_battery,
+        battery_capacity_wh=battery_capacity,
+        solar_drop_percent=monsoon_solar_drop,
+        cooling_increase_percent=monsoon_load_increase,
+        days=scenario_days,
+    )
+
+    st.subheader("Daily Energy Projection")
+
+    monsoon_df = pd.DataFrame(monsoon_result["days"])
+
+    st.dataframe(
+        monsoon_df,
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    st.subheader("Battery and Energy Shortage")
+
+    st.line_chart(
+        monsoon_df.set_index("day")[
+            ["battery_remaining_wh", "energy_shortage_wh"]
+        ]
+    )
+
+    if monsoon_result["shortage_during_scenario"]:
+        st.error(
+            "⚠️ The simplified model estimates an energy shortage "
+            "on at least one simulated day."
+        )
+    else:
+        st.success(
+            "No energy shortage estimated under these assumptions. "
+            "This does not guarantee safe storage conditions."
+        )
+
+    st.write(
+        f"**Estimated daily solar energy:** "
+        f"{monsoon_result['daily_solar_wh']:.0f} Wh"
+    )
+
+    st.write(
+        f"**Estimated daily cooling demand:** "
+        f"{monsoon_result['daily_load_wh']:.0f} Wh"
+    )
+
+    st.caption(monsoon_result["assumptions"])
+
+except (KeyError, ValueError, TypeError) as error:
+    st.error(f"Could not calculate the monsoon scenario: {error}")
+
+
+# ---------------- PRODUCE BATCH RESCUE PRIORITY ----------------
+
+st.divider()
+st.header("📦 Produce Batch Rescue Priority")
+
+st.caption(
+    "Compare demo batches to support decisions when energy is limited. "
+    "Scores are illustrative and do not predict spoilage or food safety."
+)
+
+batch_col1, batch_col2 = st.columns(2)
+
+with batch_col1:
+    batch_name = st.text_input(
+        "Batch name",
+        value="Batch A",
+        key="batch_name",
+    )
+
+    batch_temp = st.number_input(
+        "Current batch temperature (°C)",
+        min_value=-20.0,
+        max_value=60.0,
+        value=float(latest["temperature"]),
+        step=0.5,
+        key="batch_temp",
+    )
+
+    batch_storage_hours = st.number_input(
+        "Time in storage (hours)",
+        min_value=0.0,
+        max_value=1000.0,
+        value=24.0,
+        step=1.0,
+        key="batch_storage_hours",
+    )
+
+with batch_col2:
+    batch_quantity = st.number_input(
+        "Batch quantity (kg)",
+        min_value=0.0,
+        max_value=100000.0,
+        value=50.0,
+        step=5.0,
+        key="batch_quantity",
+    )
+
+    batch_target_min = st.number_input(
+        "Batch target minimum (°C)",
+        min_value=-20.0,
+        max_value=59.0,
+        value=float(target_min),
+        step=0.5,
+        key="batch_target_min",
+    )
+
+    batch_target_max = st.number_input(
+        "Batch target maximum (°C)",
+        min_value=-19.0,
+        max_value=60.0,
+        value=float(target_max),
+        step=0.5,
+        key="batch_target_max",
+    )
+
+if st.button("Calculate Batch Priority", key="calculate_batch_priority"):
+    try:
+        batch_result = calculate_batch_priority(
+            current_temp=batch_temp,
+            target_min=batch_target_min,
+            target_max=batch_target_max,
+            storage_hours=batch_storage_hours,
+            quantity_kg=batch_quantity,
+        )
+
+        st.subheader(f"Priority Result: {batch_name or 'Unnamed batch'}")
+
+        result_col1, result_col2 = st.columns(2)
+
+        result_col1.metric(
+            "Demo Priority Score",
+            f"{batch_result['score']:.1f}/100",
+        )
+
+        result_col2.metric(
+            "Priority Level",
+            batch_result["priority"],
+        )
+
+        st.write(batch_result["explanation"])
+        st.caption(batch_result["caveat"])
+
+        if batch_result["priority"] == "HIGH":
+            st.warning(
+                "Review this batch promptly against verified crop-specific "
+                "handling procedures and available resources."
+            )
+        elif batch_result["priority"] == "MEDIUM":
+            st.info(
+                "Review this batch and compare it with other batches."
+            )
+        else:
+            st.success(
+                "This batch has a lower demo score than higher-scoring "
+                "batches; continue normal monitoring."
+            )
+
+    except ValueError as error:
+        st.error(f"Please check the batch inputs: {error}")
