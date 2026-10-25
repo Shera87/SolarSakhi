@@ -81,6 +81,26 @@ with st.sidebar:
         format_func=lambda x: f"{x:g} hour(s)",
     )
 
+
+    st.header("What-if Simulation")
+
+    solar_drop = st.slider(
+        "Solar power decrease (%)",
+        min_value=0,
+        max_value=100,
+        value=30,
+        step=10,
+    )
+
+    cooling_increase = st.slider(
+        "Cooling load increase (%)",
+        min_value=0,
+        max_value=100,
+        value=20,
+        step=10,
+    )
+
+
 st.divider()
 
 if st.button("Generate Next Reading", type="primary"):
@@ -168,7 +188,141 @@ st.write(f"**Status:** {latest['status']}")
 st.write(f"**Alert:** {latest['alert']}")
 st.write(f"**Energy:** {latest['power_status']}")
 
+
+st.subheader("Smart Temperature Risk Alert")
+
+current_temp = latest["temperature"]
+predicted_temp = latest["prediction"]
+
+if (
+    current_temp < target_min
+    or current_temp > target_max
+    or predicted_temp < target_min
+    or predicted_temp > target_max
+):
+    risk_level = "HIGH"
+    risk_message = (
+        "Current or predicted temperature is outside "
+        "the selected demo target range."
+    )
+elif (
+    current_temp < target_min + 1
+    or current_temp > target_max - 1
+    or predicted_temp < target_min + 1
+    or predicted_temp > target_max - 1
+):
+    risk_level = "MEDIUM"
+    risk_message = (
+        "Temperature is close to a demo target boundary."
+    )
+else:
+    risk_level = "LOW"
+    risk_message = (
+        "Current and predicted temperatures are within "
+        "the selected demo target range."
+    )
+
+st.metric("Temperature Risk Indicator", risk_level)
+st.write(risk_message)
+st.caption(
+    "Illustrative temperature-risk indicator only. "
+    "It does not predict actual food spoilage or food safety."
+)
+
+
+st.subheader("Solar Energy Efficiency Score")
+
+if latest["cooling"]:
+    active_cooling_load = cooling_power
+    solar_coverage = (
+    latest["solar_power"] / active_cooling_load * 100
+)
+
+    st.metric(
+        "Solar Coverage of Cooling Load",
+        f"{solar_coverage:.1f}%",
+    )
+    st.caption(
+        "Estimated instantaneous solar-power coverage of the "
+        "configured cooling load; not total system efficiency."
+    )
+else:
+    st.info("Cooling is OFF. Solar coverage score is not applicable.")
+
+
+
+st.subheader("Estimated Backup Runtime")
+
+# Assumption for demonstration only; replace with a real battery
+# capacity when the hardware design is known.
+DEMO_BATTERY_CAPACITY_WH = 1000
+
+if cooling_power > 0:
+    stored_energy_wh = (
+        DEMO_BATTERY_CAPACITY_WH * latest["battery"] / 100
+    )
+    backup_hours = stored_energy_wh / cooling_power
+
+    st.metric(
+        "Estimated Runtime Without Solar",
+        f"{backup_hours:.2f} hours",
+    )
+else:
+    st.info("Cooling load is unavailable for runtime estimation.")
+
+st.caption(
+    "Estimate assumes a 1,000 Wh battery and ignores inverter "
+    "losses, battery limits, changing loads and other real-world factors."
+)
+
+st.subheader("What-if Scenario Results")
+
+scenario_solar = latest["solar_power"] * (1 - solar_drop / 100)
+scenario_load = cooling_power * (1 + cooling_increase / 100)
+
+scenario_col1, scenario_col2 = st.columns(2)
+
+scenario_col1.metric(
+    "Solar Power After Change",
+    f"{scenario_solar:.1f} W",
+    delta=f"-{solar_drop}% solar",
+)
+
+scenario_col2.metric(
+    "Cooling Load After Change",
+    f"{scenario_load:.1f} W",
+    delta=f"+{cooling_increase}% load",
+)
+
+
+
+if scenario_load > 0:
+    scenario_coverage = scenario_solar / scenario_load * 100
+
+    st.write(
+        f"**Hypothetical solar coverage:** "
+        f"{scenario_coverage:.1f}%"
+    )
+
+    st.write(
+        f"**Solar power surplus:** "
+        f"{max(0, scenario_solar - scenario_load):.1f} W"
+    )
+
+    if scenario_solar < scenario_load:
+        st.warning(
+            "Hypothetical solar power is below the cooling load. "
+            "Additional energy would be needed to meet the full load."
+        )
+    else:
+        st.success(
+            "Hypothetical solar power meets or exceeds the cooling load."
+        )
+else:
+    st.info("Cooling is OFF in the current simulation.")
+
 history_df = pd.DataFrame(st.session_state.history)
+
 
 st.subheader("Temperature Monitoring")
 fig = go.Figure()
@@ -203,6 +357,87 @@ energy_fig.update_layout(
 )
 st.plotly_chart(energy_fig, use_container_width=True)
 
+
+st.subheader("Energy and Storage Comparison")
+
+# 1. Solar Power vs Cooling Power
+st.write("1. Solar Power vs Cooling Power")
+
+power_df = pd.DataFrame({
+    "Power Type": ["Solar Power", "Cooling Power Load"],
+    "Power (W)": [
+        latest["solar_power"],
+        cooling_power if latest["cooling"] else 0,
+    ],
+})
+
+power_fig = go.Figure(go.Bar(
+    x=power_df["Power Type"],
+    y=power_df["Power (W)"],
+    marker_color=["#F4B400", "#FF6B6B"],
+    text=power_df["Power (W)"].round(1),
+    textposition="outside",
+))
+power_fig.update_layout(
+    yaxis_title="Power (W)",
+    showlegend=False,
+)
+st.plotly_chart(power_fig, use_container_width=True)
+
+# 2. Battery Level vs PCM State
+st.write("2. Battery Level vs PCM State")
+
+storage_df = pd.DataFrame({
+    "Storage Component": ["Battery Level", "PCM State"],
+    "Level (%)": [latest["battery"], latest["pcm"]],
+})
+
+storage_fig = go.Figure(go.Bar(
+    x=storage_df["Storage Component"],
+    y=storage_df["Level (%)"],
+    marker_color=["#2ECC71", "#9B59B6"],
+    text=storage_df["Level (%)"].round(1),
+    textposition="outside",
+))
+storage_fig.update_layout(
+    yaxis_title="Level (%)",
+    yaxis_range=[0, 110],
+    showlegend=False,
+)
+st.plotly_chart(storage_fig, use_container_width=True)
+
+# 3. Crop Temperature Range
+st.write("3. Crop Temperature Range")
+
+temperature_df = pd.DataFrame({
+    "Temperature Type": [
+        "Minimum Target",
+        "Current Temperature",
+        "Predicted Temperature",
+        "Maximum Target",
+    ],
+    "Temperature (°C)": [
+        target_min,
+        latest["temperature"],
+        latest["prediction"],
+        target_max,
+    ],
+})
+
+temperature_fig = go.Figure(go.Bar(
+    x=temperature_df["Temperature Type"],
+    y=temperature_df["Temperature (°C)"],
+    marker_color=["#3498DB", "#E67E22", "#8E44AD", "#E74C3C"],
+    text=temperature_df["Temperature (°C)"].round(2),
+    textposition="outside",
+))
+temperature_fig.update_layout(
+    yaxis_title="Temperature (°C)",
+    showlegend=False,
+)
+st.plotly_chart(temperature_fig, use_container_width=True)
+
+
 st.subheader("Recent Readings")
 st.dataframe(history_df.tail(20), use_container_width=True)
 
@@ -213,6 +448,71 @@ st.download_button(
     file_name="solarsakhi_simulation.csv",
     mime="text/csv",
 )
+
+
+st.subheader("Automatic Simulation Report")
+
+report_solar_coverage = (
+    f"{solar_coverage:.1f}%"
+    if latest["cooling"] else "Not applicable (cooling OFF)"
+)
+
+report_runtime = (
+    f"{backup_hours:.2f} hours"
+    if cooling_power > 0 else "Unavailable"
+)
+
+report_text = f"""
+SOLARSAKHI - SIMULATION REPORT
+================================
+
+Report Time: {latest['time']}
+Crop Profile: {crop}
+
+TEMPERATURE
+-----------
+Current Temperature: {latest['temperature']:.2f} °C
+Predicted Temperature: {latest['prediction']:.2f} °C
+Demo Minimum Target: {target_min:.1f} °C
+Demo Maximum Target: {target_max:.1f} °C
+Temperature Risk Indicator: {risk_level}
+Risk Details: {risk_message}
+
+ENERGY
+------
+Solar Power: {latest['solar_power']:.2f} W
+Cooling Load Setting: {cooling_power} W
+Cooling Recommendation: {'ON' if latest['cooling'] else 'OFF'}
+Battery Level: {latest['battery']:.1f}%
+PCM State: {latest['pcm']:.1f}%
+Solar Coverage: {report_solar_coverage}
+Estimated Backup Runtime: {report_runtime}
+Energy Status: {latest['power_status']}
+
+WHAT-IF SCENARIO
+----------------
+Solar Reduction: {solar_drop}%
+Cooling Load Increase: {cooling_increase}%
+Hypothetical Solar Power: {scenario_solar:.2f} W
+Hypothetical Cooling Load: {scenario_load:.2f} W
+
+IMPORTANT LIMITATIONS
+---------------------
+This is a software prototype using simulated sensor readings.
+Temperature risk is not a validated food-spoilage prediction.
+Runtime uses an assumed 1000 Wh battery and is approximate.
+Solar coverage is not total system efficiency.
+No real hardware sensor or cooling system is connected.
+"""
+
+st.download_button(
+    "Download Simulation Report (TXT)",
+    data=report_text,
+    file_name="solarsakhi_report.txt",
+    mime="text/plain",
+)
+
+
 
 if st.button("Reset Simulation"):
     st.session_state.simulator = ColdStorageSimulator()
