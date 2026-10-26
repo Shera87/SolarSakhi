@@ -108,6 +108,62 @@ with st.sidebar:
     )
 
 
+
+# ---------------- SOFTWARE-BASED IOT SENSOR SIMULATOR ----------------
+st.divider()
+st.header("📡 IoT Sensor Monitoring Simulator")
+st.caption(
+    "Software-only IoT demonstration. Values below are simulated; "
+    "no physical sensors or ESP32 are connected."
+)
+
+import random
+from datetime import datetime
+
+if "iot_sensor_reading" not in st.session_state:
+    st.session_state.iot_sensor_reading = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "temperature": 8.5,
+        "humidity": 65.0,
+        "solar_power": 350.0,
+        "battery_level": 78.0,
+        "device_status": "Simulated / Ready",
+    }
+
+if st.button("🔄 Refresh Sensor Data", key="refresh_iot_sensor_data"):
+    previous = st.session_state.iot_sensor_reading
+    st.session_state.iot_sensor_reading = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "temperature": round(max(-5.0, min(35.0, previous["temperature"] + random.uniform(-1.0, 1.0))), 1),
+        "humidity": round(max(20.0, min(100.0, previous["humidity"] + random.uniform(-4.0, 4.0))), 1),
+        "solar_power": round(max(0.0, min(1000.0, previous["solar_power"] + random.uniform(-60.0, 60.0))), 1),
+        "battery_level": round(max(0.0, min(100.0, previous["battery_level"] + random.uniform(-3.0, 2.0))), 1),
+        "device_status": "Simulated / Updated",
+    }
+
+iot_reading = st.session_state.iot_sensor_reading
+iot_col1, iot_col2, iot_col3, iot_col4 = st.columns(4)
+iot_col1.metric("🌡️ Sensor Temperature", f"{iot_reading['temperature']:.1f} °C")
+iot_col2.metric("💧 Sensor Humidity", f"{iot_reading['humidity']:.1f}%")
+iot_col3.metric("☀️ Solar Power (simulated)", f"{iot_reading['solar_power']:.1f} W")
+iot_col4.metric("🔋 Battery Level (simulated)", f"{iot_reading['battery_level']:.1f}%")
+
+status_col1, status_col2 = st.columns(2)
+status_col1.info(f"📶 Device status: **{iot_reading['device_status']}**")
+status_col2.caption(f"Last simulated update: {iot_reading['timestamp']}")
+
+iot_table = pd.DataFrame([
+    {"Parameter": "Temperature", "Reading": iot_reading["temperature"], "Unit": "°C"},
+    {"Parameter": "Humidity", "Reading": iot_reading["humidity"], "Unit": "%"},
+    {"Parameter": "Solar power", "Reading": iot_reading["solar_power"], "Unit": "W"},
+    {"Parameter": "Battery level", "Reading": iot_reading["battery_level"], "Unit": "%"},
+])
+st.dataframe(iot_table, use_container_width=True, hide_index=True)
+st.caption(
+    "These demo values are separate from the main cold-storage simulation. "
+    "The device status is not a real network connection."
+)
+
 st.divider()
 
 if st.button("Generate Next Reading", type="primary"):
