@@ -848,3 +848,110 @@ if st.button("Calculate Batch Priority", key="calculate_batch_priority"):
 
     except ValueError as error:
         st.error(f"Please check the batch inputs: {error}")
+
+# ---------------- SOLARSAKHI 3.0: INTEGRATED INTELLIGENCE LAB ----------------
+
+st.divider()
+st.header("🧠 SolarSakhi — Predict, Optimize & Rescue")
+st.caption(
+    "Integrated decision-support demo combining energy strategy comparison, "
+    "future scenario simulation, and batch rescue planning. Outputs are estimates, not hardware guarantees."
+)
+
+# Shared latest reading and user-selected assumptions
+current_temp = float(latest["temperature"])
+current_solar = float(latest["solar_power"])
+current_battery = float(latest["battery"])
+current_humidity = float(latest.get("humidity", 65.0))
+
+st.subheader("1. 🧠 AI Energy Strategy Optimizer")
+st.write("Compare simple strategies using the same simulated conditions.")
+opt_col1, opt_col2, opt_col3 = st.columns(3)
+with opt_col1:
+    opt_solar_w = st.number_input("Available solar power (W)", 0.0, 5000.0, current_solar, 25.0, key="opt_solar_w")
+with opt_col2:
+    opt_load_w = st.number_input("Cooling demand (W)", 1.0, 5000.0, float(cooling_power), 25.0, key="opt_load_w")
+with opt_col3:
+    reserve_pct = st.slider("Battery reserve target (%)", 0, 90, 25, 5, key="opt_reserve_pct")
+
+battery_available = max(0.0, current_battery - reserve_pct) / 100.0
+solar_fraction = min(1.0, opt_solar_w / max(opt_load_w, 1.0))
+strategies = pd.DataFrame([
+    {"Strategy": "Normal cooling", "Solar load coverage (%)": round(solar_fraction * 100, 1), "Battery reserve protected": "Not prioritized", "Demo recommendation": "Run baseline control"},
+    {"Strategy": "Solar-first", "Solar load coverage (%)": round(solar_fraction * 100, 1), "Battery reserve protected": "When solar covers load", "Demo recommendation": "Use solar when available"},
+    {"Strategy": "Reserve-aware optimizer", "Solar load coverage (%)": round(solar_fraction * 100, 1), "Battery reserve protected": "Yes, target applied", "Demo recommendation": "Prioritize solar; avoid drawing below reserve in this simplified policy"},
+])
+st.dataframe(strategies, use_container_width=True, hide_index=True)
+if opt_solar_w >= opt_load_w:
+    st.success("Recommended demo plan: available solar power can cover the configured cooling load; preserve battery charge where possible.")
+elif current_battery > reserve_pct:
+    st.warning("Recommended demo plan: solar power is below the cooling load. Check battery headroom and consider a backup/thermal-storage plan.")
+else:
+    st.error("Energy risk: solar power is below demand and battery is at/near the selected reserve. Review the scenario and operator response.")
+st.caption("This is a transparent rule-based strategy comparison, not a trained optimizer or validated control system. No actual energy savings are measured.")
+
+st.divider()
+st.subheader("2. 🌦️ Digital Twin — Future Scenario Lab")
+st.write("Explore how the simulated storage may respond to low solar generation and higher cooling demand.")
+dt1, dt2, dt3 = st.columns(3)
+with dt1:
+    future_hours = st.slider("Scenario duration (hours)", 1, 72, 12, key="dt_hours")
+with dt2:
+    future_solar_drop = st.slider("Future solar reduction (%)", 0, 100, 70, 10, key="dt_solar_drop")
+with dt3:
+    future_load_rise = st.slider("Cooling demand increase (%)", 0, 150, 25, 5, key="dt_load_rise")
+future_temp_rise = st.slider("Ambient/heat stress assumption (°C added to storage trend)", 0.0, 10.0, 2.0, 0.5, key="dt_temp_rise")
+
+future_solar = opt_solar_w * (1 - future_solar_drop / 100.0)
+future_load = opt_load_w * (1 + future_load_rise / 100.0)
+future_battery_wh = 1000.0 * current_battery / 100.0  # clearly stated demo capacity assumption
+net_deficit_w = max(0.0, future_load - future_solar)
+estimated_battery_hours = future_battery_wh / net_deficit_w if net_deficit_w > 0 else float("inf")
+projected_temp = current_temp + future_temp_rise * min(1.0, future_hours / 24.0) * (1.0 if future_solar < future_load else 0.25)
+sc1, sc2, sc3, sc4 = st.columns(4)
+sc1.metric("Scenario solar", f"{future_solar:.0f} W")
+sc2.metric("Scenario cooling load", f"{future_load:.0f} W")
+sc3.metric("Projected demo temperature", f"{projected_temp:.1f} °C", delta=f"{projected_temp-current_temp:+.1f} °C")
+sc4.metric("Idealized battery runtime", "No deficit" if net_deficit_w == 0 else f"{estimated_battery_hours:.1f} h")
+if projected_temp < target_min or projected_temp > target_max:
+    st.error(f"Scenario warning: projected demo temperature is outside the selected {crop} illustrative target ({target_min:g}–{target_max:g} °C). Review the response plan.")
+else:
+    st.info("Projected demo temperature remains inside the selected illustrative target under these assumptions; continue monitoring.")
+st.caption("Digital-twin estimate only: assumes 1,000 Wh battery capacity and a simplified temperature response. It is not a weather forecast, validated thermal model, or food-safety prediction.")
+
+st.divider()
+st.subheader("3. 🆘 Rescue Mission Planner")
+st.write("Rank sample batches for operator review using temperature deviation, storage duration, and available energy context.")
+rescue_count = st.number_input("Number of demo batches to compare", min_value=2, max_value=5, value=3, step=1, key="rescue_count")
+rescue_rows = []
+for idx in range(int(rescue_count)):
+    with st.expander(f"Batch {idx + 1}", expanded=(idx == 0)):
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        with rc1:
+            name = st.text_input("Batch name", f"Batch {chr(65 + idx)}", key=f"rescue_name_{idx}")
+        with rc2:
+            temp = st.number_input("Temperature (°C)", -20.0, 60.0, float(current_temp + idx * 1.5), 0.5, key=f"rescue_temp_{idx}")
+        with rc3:
+            hours = st.number_input("Storage time (h)", 0.0, 1000.0, float(12 * (idx + 1)), 1.0, key=f"rescue_hours_{idx}")
+        with rc4:
+            qty = st.number_input("Quantity (kg)", 0.0, 100000.0, float(20 * (idx + 1)), 5.0, key=f"rescue_qty_{idx}")
+        outside = max(0.0, target_min - temp, temp - target_max)
+        score = min(100.0, outside * 12.0 + min(hours / 24.0, 5.0) * 4.0 + (8.0 if current_battery < 20 else 0.0))
+        level = "HIGH" if score >= 35 else "MEDIUM" if score >= 15 else "LOW"
+        action = "Inspect promptly; verify crop handling requirements and safe transfer options." if level == "HIGH" else "Monitor closely and prepare a contingency." if level == "MEDIUM" else "Continue monitoring under the selected demo assumptions."
+        rescue_rows.append({"Batch": name, "Temperature (°C)": temp, "Storage (h)": hours, "Quantity (kg)": qty, "Demo risk score": round(score, 1), "Priority": level, "Suggested action": action})
+rescue_df = pd.DataFrame(rescue_rows).sort_values("Demo risk score", ascending=False)
+st.dataframe(rescue_df, use_container_width=True, hide_index=True)
+first = rescue_df.iloc[0]
+st.markdown(f"**First batch to review:** {first['Batch']} — **{first['Priority']} priority** (demo score {first['Demo risk score']}/100).")
+st.write(first["Suggested action"])
+st.caption("Priority score is a transparent heuristic for demonstration only; it does not predict spoilage, crop quality, or food safety. Confirm decisions against verified crop-specific procedures.")
+
+st.divider()
+st.subheader("🔗 Integrated recommendation")
+if future_solar < future_load and (projected_temp < target_min or projected_temp > target_max):
+    st.error("Combined scenario indicates both an energy deficit and a possible target-temperature deviation. Review the highest-priority batch, preserve backup where feasible, and follow the site's verified contingency procedure.")
+elif future_solar < future_load:
+    st.warning("Combined scenario indicates an energy deficit. Review battery reserve, PCM assumptions, and the rescue list before conditions worsen.")
+else:
+    st.success("Under the selected assumptions, solar generation covers the modeled cooling load. Keep monitoring and reassess if conditions change.")
